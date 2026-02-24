@@ -1,0 +1,59 @@
+# Compiled class files
+*.class
+
+# Log files
+*.log
+
+# BlueJ
+*.swp
+
+# Package files
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# #core
+# /pakt/*.md
+# /pakt/**/*.md
+
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IDE
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Spring Boot
+spring-boot-dev.properties
+spring-boot-prod.properties
+
+# Application logs
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+
+#agent
+.classpath
+.factorypath
+.project
+.settings/

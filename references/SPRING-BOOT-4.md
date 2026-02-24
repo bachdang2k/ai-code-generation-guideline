@@ -1,0 +1,647 @@
+# Spring Boot 4 Migration Guide
+
+## Contents
+- [Overview](#overview)
+- [System Requirements](#system-requirements)
+- [Critical Considerations When Creating Spring Boot 4 Projects](#critical-considerations-when-creating-spring-boot-4-projects)
+- [Major Changes from Spring Boot 3](#major-changes-from-spring-boot-3)
+- [Migration Strategy](#migration-strategy)
+- [Best Practices for Spring Boot 4 Projects](#best-practices-for-spring-boot-4-projects)
+- [Resources](#resources)
+
+## Overview  
+
+This guide covers the key changes in Spring Boot 4.0 and what to consider when creating new Spring Boot 4 projects.
+
+**Release Date:** November 21, 2024  
+**Major Version:** 4.0.x  
+**Based on:** Spring Framework 7.0, Jakarta EE 11
+
+## System Requirements
+
+> Scripts in this skill **prefer Spring Boot 4.x**. If start.spring.io still defaults to 3.x, they **fallback** to `springBootFallback` from `versions.json` with a warning. Override with `--boot-version`/`-BootVersion`.
+
+### Minimum Requirements
+
+1. Java: 17+ (Java 25 recommended for production)
+2. Kotlin: 2.2+ (if using Kotlin)
+3. GraalVM: 25+ (for native images)
+4. Jakarta EE: 11 baseline (Servlet 6.1+)
+5. Maven: 3.8+
+6. Gradle: 8.14+ or 9.x
+
+### Key Version Upgrades
+
+1. Spring Framework 7.0
+2. Spring Data 2025.1
+3. Spring Security 7.0
+4. Hibernate 7.1
+5. TestContainers 2.0
+6. Jackson 3.0
+7. Tomcat 11.0
+8. Jetty 12.1
+
+## Critical Considerations When Creating Spring Boot 4 Projects
+
+⚠️ **Most Common Mistakes** - Always verify these when generating code:
+
+0. **Maven-only / No Lombok / Hibernate ddl-auto**: Do not generate Gradle builds; enforce no Lombok usage via Maven Enforcer + ArchUnit (snippet below). Use Hibernate ddl-auto for schema management (no Flyway, no Liquibase).
+
+### 1. Jackson 3 Annotations Stay in `com.fasterxml.jackson.annotation`
+
+**✅ CORRECT - Annotations do NOT change package:**
+```java
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonFormat;
+```
+
+**❌ WRONG - Do NOT use `tools.jackson.annotation`:**
+```java
+import tools.jackson.annotation.JsonProperty;  // This package doesn't exist!
+```
+
+**Only Jackson API classes change to `tools.jackson`:**
+```java
+import tools.jackson.databind.ObjectMapper;  // ✅ Correct for API classes
+```
+
+See "Jackson 2 to Jackson 3 Migration" section below for complete details.
+
+### 2. TestcontainersConfiguration Must Be Package-Private
+
+**✅ CORRECT - Package-private (no `public` modifier):**
+```java
+@TestConfiguration(proxyBeanMethods = false)
+class TestcontainersConfiguration {  // No public!
+    // ...
+}
+```
+
+**❌ WRONG - Public modifier:**
+```java
+public class TestcontainersConfiguration {  // Wrong!
+    // ...
+}
+```
+
+This is a Spring Boot 4 requirement for test configurations. See "Testing Changes" section below for more details.
+
+### 3. TestContainers 2.x Artifact & Package Rename
+
+**Maven artifact renamed:**
+```xml
+<!-- ❌ WRONG (TC 1.x artifact): -->
+<artifactId>postgresql</artifactId>
+
+<!-- ✅ CORRECT (TC 2.x artifact): -->
+<artifactId>testcontainers-postgresql</artifactId>
+```
+
+**Class package renamed:**
+```java
+// ❌ WRONG (TC 1.x):
+import org.testcontainers.containers.PostgreSQLContainer;
+
+// ✅ CORRECT (TC 2.x):
+import org.testcontainers.postgresql.PostgreSQLContainer;
+```
+
+The `junit-jupiter` artifact is no longer needed — TC 2.x integrates with JUnit 5 directly.
+
+### 4. @WebMvcTest Moved to New Package
+
+```java
+// ❌ WRONG (Spring Boot 3):
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+
+// ✅ CORRECT (Spring Boot 4):
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+```
+
+Requires `spring-boot-starter-webmvc-test` dependency (not included in `spring-boot-starter-test`).
+
+### 5. Always Set `mainClass` in `pom.xml`
+
+Spring Boot 4's `process-aot` goal (used for native images and AOT processing) may fail to auto-detect the main class.
+
+**✅ CORRECT - Always add `start-class` property to `pom.xml`:**
+```xml
+<properties>
+    <java.version>25</java.version>
+    <!-- Use your actual main class: {CamelCaseArtifactId}Application -->
+    <start-class>com.example.app.MyAppApplication</start-class>
+</properties>
+```
+
+This ensures both `spring-boot-maven-plugin` and `native-maven-plugin` can find the entry point. Without it, Docker builds and native compilations will fail with:
+```
+Unable to find a suitable main class, please add a 'mainClass' property
+```
+
+---
+
+## Major Changes from Spring Boot 3
+
+### 1. Modular Architecture
+
+Spring Boot 4 introduces a **new modular design** with technology-specific modules and starters.
+
+**New Naming Convention:**
+- Modules: `spring-boot-<technology>` (e.g., `spring-boot-graphql`)
+- Root packages: `org.springframework.boot.<technology>`
+- Starters: `spring-boot-starter-<technology>` (e.g., `spring-boot-starter-graphql`)
+- Test starters: `spring-boot-starter-<technology>-test`
+
+**Important:** Most technologies now have dedicated starters where they didn't before.
+
+**For quick upgrades:** Use `spring-boot-starter-classic` to get all modules at once (but migrate away eventually).
+
+### 2. Testing Changes
+
+#### @WebMvcTest and @AutoConfigureMockMvc Package Change
+
+**Critical:** Due to the modular architecture, `@WebMvcTest` and `@AutoConfigureMockMvc` moved to a new package and require a new test starter dependency.
+
+**New dependency required:**
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-webmvc-test</artifactId>
+    <scope>test</scope>
+</dependency>
+```
+
+**Import change:**
+```java
+// OLD (Spring Boot 3):
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+
+// NEW (Spring Boot 4):
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+```
+
+> ⚠️ `spring-boot-starter-test` alone no longer provides `@WebMvcTest`. You **must** add `spring-boot-starter-webmvc-test`.
+
+#### @MockBean and @SpyBean Deprecation
+**Critical:** `@MockBean` and `@SpyBean` are **deprecated** and will be removed in future releases.
+
+**Migration:**
+```java
+// OLD (Deprecated):
+import org.springframework.boot.test.mock.mockito.MockBean;
+
+@SpringBootTest
+class MyTest {
+    @MockBean
+    private UserService userService;
+}
+
+// NEW (Spring Boot 4):
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+
+@SpringBootTest
+class MyTest {
+    @MockitoBean
+    private UserService userService;
+}
+```
+
+**For shared mocks across tests:**
+```java
+// Create custom annotation
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@MockitoBean(types = {UserService.class, OrderService.class})
+public @interface SharedMocks {
+}
+
+// Use on test classes
+@SpringBootTest
+@SharedMocks
+class ApplicationTests {
+    // Clean and reusable
+}
+```
+
+#### Test Starter Changes
+
+1. `@SpringBootTest` no longer provides MockMVC automatically - add `@AutoConfigureMockMvc`
+2. `@SpringBootTest` no longer provides `TestRestTemplate` - add `@AutoConfigureTestRestTemplate`
+3. `@WebMvcTest` and `@AutoConfigureMockMvc` moved to `org.springframework.boot.webmvc.test.autoconfigure` package — requires `spring-boot-starter-webmvc-test` dependency
+4. Consider using new `RestTestClient` instead of `TestRestTemplate`
+
+#### TestContainers 2.0
+
+1. Required version: TestContainers 2.0+
+2. Enhanced performance and resource management
+3. Works seamlessly with `@ServiceConnection` annotation
+4. **Artifact rename:** `org.testcontainers:postgresql` → `org.testcontainers:testcontainers-postgresql`
+5. **Package rename:** `org.testcontainers.containers.PostgreSQLContainer` → `org.testcontainers.postgresql.PostgreSQLContainer`
+6. `junit-jupiter` artifact removed — TC 2.x integrates with JUnit 5 directly
+7. **`PostgreSQLContainer` is no longer generic** — use `PostgreSQLContainer` (not `PostgreSQLContainer<?>`) and `new PostgreSQLContainer(...)` (not `new PostgreSQLContainer<>(...)`)
+
+#### Maven Enforcer + ArchUnit guardrails (no Lombok, enforce Maven)
+
+_Add this to `pom.xml` to enforce minimum Maven, Java, and block Lombok dependency:_
+```xml
+<build>
+  <plugins>
+    <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-enforcer-plugin</artifactId>
+      <version>3.4.1</version>
+      <executions>
+        <execution>
+          <id>enforce</id>
+          <goals><goal>enforce</goal></goals>
+          <configuration>
+            <rules>
+              <requireMavenVersion>
+                <version>[3.8,)</version>
+              </requireMavenVersion>
+              <requireJavaVersion>
+                <version>[21,)</version>
+              </requireJavaVersion>
+              <bannedDependencies>
+                <excludes>
+                  <exclude>org.projectlombok:lombok</exclude>
+                </excludes>
+              </bannedDependencies>
+            </rules>
+            <fail>true</fail>
+          </configuration>
+        </execution>
+      </executions>
+    </plugin>
+  </plugins>
+</build>
+```
+
+_Add an ArchUnit test to `src/test/java/.../architecture/NoLombokTest.java`:_
+```java
+package com.example.app.architecture;
+
+import com.tngtech.archunit.junit.AnalyzeClasses;
+import com.tngtech.archunit.junit.ArchTest;
+import com.tngtech.archunit.lang.syntax.ArchRuleDefinition;
+
+@AnalyzeClasses(packages = "com.example.app")
+public class NoLombokTest {
+  @ArchTest
+  static final var noLombok = ArchRuleDefinition.noClasses()
+    .should().accessClassesThat().haveNameMatching(".*lombok.*")
+    .because("Lombok is not allowed; use records or explicit code");
+}
+```
+
+
+### 3. Removed Features
+
+#### Undertow Server
+**Removed:** Spring Boot 4 requires Servlet 6.1, which Undertow doesn't support yet.
+- Use **Tomcat 11** (default) or **Jetty 12** instead
+- No migration path currently available
+
+#### Other Removals
+
+1. Embedded executable jar launch scripts
+2. Pulsar Reactive support
+3. Spring Session Hazelcast (now maintained by Hazelcast team)
+4. Spring Session MongoDB (now maintained by MongoDB team)
+5. Spock integration (waiting for Groovy 5 support)
+
+### 4. Jackson 2 to Jackson 3 Migration
+
+**Major change:** Jackson 3 uses new group IDs and package names.
+
+**Group ID changes:**
+```xml
+<!-- Jackson 2 (old): -->
+<groupId>com.fasterxml.jackson.core</groupId>
+
+<!-- Jackson 3 (new): -->
+<groupId>tools.jackson.core</groupId>
+<!-- Exception: jackson-annotations still uses com.fasterxml.jackson.core -->
+```
+
+**Package changes:**
+- `com.fasterxml.jackson` → `tools.jackson`
+- **IMPORTANT Exception:** `com.fasterxml.jackson.annotation` remains unchanged
+
+**Critical: Common Jackson annotations DO NOT change:**
+```java
+// These annotations stay the same - DO NOT change these imports:
+import com.fasterxml.jackson.annotation.JsonProperty;      // ✅ Correct
+import com.fasterxml.jackson.annotation.JsonIgnore;        // ✅ Correct
+import com.fasterxml.jackson.annotation.JsonFormat;        // ✅ Correct
+import com.fasterxml.jackson.annotation.JsonCreator;       // ✅ Correct
+import com.fasterxml.jackson.annotation.JsonValue;         // ✅ Correct
+import com.fasterxml.jackson.annotation.JsonInclude;       // ✅ Correct
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties; // ✅ Correct
+
+// WRONG - These packages don't exist:
+import tools.jackson.annotation.JsonProperty;  // ❌ WRONG!
+```
+
+**What DOES change - Jackson API/core packages:**
+```java
+// OLD (Jackson 2):
+import com.fasterxml.jackson.databind.ObjectMapper;       // ❌ Old
+import com.fasterxml.jackson.core.JsonProcessingException; // ❌ Old
+import com.fasterxml.jackson.databind.JsonNode;           // ❌ Old
+
+// NEW (Jackson 3):
+import tools.jackson.databind.ObjectMapper;               // ✅ New
+import tools.jackson.core.JsonProcessingException;         // ✅ New
+import tools.jackson.databind.JsonNode;                   // ✅ New
+```
+
+**Rule of thumb:**
+- **Annotations** (`@JsonProperty`, `@JsonIgnore`, etc.) → Keep `com.fasterxml.jackson.annotation`
+- **API classes** (`ObjectMapper`, `JsonNode`, etc.) → Change to `tools.jackson`
+
+**Spring Boot API changes:**
+- `JsonObjectSerializer` → `ObjectValueSerializer`
+- `JsonValueDeserializer` → `ObjectValueDeserializer`
+- `Jackson2ObjectMapperBuilderCustomizer` → `JsonMapperBuilderCustomizer`
+- `@JsonComponent` → `@JacksonComponent`
+- `@JsonMixin` → `@JacksonMixin`
+
+**Property changes:**
+```properties
+# OLD:
+spring.jackson.read.*
+spring.jackson.write.*
+
+# NEW:
+spring.jackson.json.read.*
+spring.jackson.json.write.*
+```
+
+**Jackson 2 Compatibility:**
+- Spring Boot 4 provides deprecated `spring-boot-jackson2` module for gradual migration
+- Use `spring.jackson.use-jackson2-defaults=true` to align Jackson 3 behavior with Jackson 2
+- Properties available under `spring.jackson2.*`
+
+### 5. Web and REST Changes
+
+#### HTTP Service Clients
+New auto-configuration for HTTP Service Clients:
+```java
+@HttpExchange(url = "https://api.example.com")
+public interface ApiService {
+    @PostExchange
+    Map<?, ?> call(@RequestBody Map<String, String> data);
+}
+```
+
+#### API Versioning
+Built-in API versioning support:
+```properties
+# MVC:
+spring.mvc.apiversion.*
+
+# WebFlux:
+spring.webflux.apiversion.*
+```
+
+#### HttpMessageConverters Deprecation
+`HttpMessageConverters` is deprecated. Use instead:
+- `ClientHttpMessageConvertersCustomizer` for client converters
+- `ServerHttpMessageConvertersCustomizer` for server converters
+
+#### Static Resources
+- Fonts added to common static locations: `/fonts/**`
+- Use `PathRequest.toStaticResources().atCommonLocations().excluding(StaticResourceLocation.FONTS)` to exclude
+
+### 6. Data Access Changes
+
+#### Elasticsearch Client
+- Low-level `RestClient` replaced with `Rest5Client`
+- `RestClientBuilderCustomizer` → `Rest5ClientBuilderCustomizer`
+- Consolidated in `co.elastic.clients:elasticsearch-java` module
+
+#### MongoDB
+Property renaming to reflect Spring Data MongoDB requirement:
+```properties
+# Properties moved from spring.data.mongodb to spring.mongodb:
+spring.mongodb.host
+spring.mongodb.port
+spring.mongodb.database
+spring.mongodb.uri
+spring.mongodb.username
+spring.mongodb.password
+spring.mongodb.authentication-database
+spring.mongodb.representation.uuid
+```
+
+**New requirement:** Explicit UUID and BigDecimal representation configuration:
+```properties
+spring.mongodb.representation.uuid=STANDARD
+spring.data.mongodb.representation.big-decimal=DECIMAL128
+```
+
+#### Hibernate
+- Hibernate 7.1 required
+- `hibernate-jpamodelgen` renamed to `hibernate-processor`
+- `hibernate-proxool` and `hibernate-vibur` no longer published
+
+#### Persistence Properties
+```properties
+# OLD:
+spring.dao.exceptiontranslation.enabled
+
+# NEW:
+spring.persistence.exceptiontranslation.enabled
+```
+
+### 7. Messaging Changes
+
+#### Kafka Streams
+- `StreamBuilderFactoryBeanCustomizer` removed
+- Use Spring Kafka's `StreamsBuilderFactoryBeanConfigurer` instead
+
+#### Spring Retry Migration
+Spring Kafka and Spring AMQP moved from Spring Retry to Spring Framework's core retry:
+
+**Kafka:**
+```properties
+# OLD:
+spring.kafka.retry.topic.backoff.random
+
+# NEW (more flexible):
+spring.kafka.retry.topic.backoff.jitter
+```
+
+**AMQP:**
+- `RabbitRetryTemplateCustomizer` split into:
+  - `RabbitTemplateRetrySettingsCustomizer`
+  - `RabbitListenerRetrySettingsCustomizer`
+
+### 8. Spring Batch
+
+**Major change:** Spring Batch can now operate **without a database** (in-memory mode).
+
+- Regular `spring-boot-starter-batch` uses simplified in-memory mode
+- **To use database:** Switch to `spring-boot-starter-batch-jdbc`
+
+### 9. New Features
+
+#### OpenTelemetry Starter
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-opentelemetry</artifactId>
+</dependency>
+```
+Auto-configures OpenTelemetry SDK for metrics and traces over OTLP.
+
+#### Kotlin Serialization
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-kotlinx-serialization</artifactId>
+</dependency>
+```
+Provides `Json` bean and HTTP message converter support.
+
+#### RestTestClient
+New testing support for `RestTestClient`:
+- Works with `MockMvc` in `@SpringBootTest`
+- Works with running server for integration tests
+- Consider replacing `TestRestTemplate` usage
+
+### 10. Configuration Changes
+
+#### Nullability Annotations
+- Spring Boot 4 adds **JSpecify nullability annotations**
+- May cause compilation failures with null checkers or Kotlin
+- Migrate from `org.springframework.lang` to JSpecify annotations
+
+#### DevTools
+- Live reload **disabled by default**
+- Enable with: `spring.devtools.livereload.enabled=true`
+
+#### Logging
+- Console logging can be disabled: `logging.console.enabled=false`
+- Default charset harmonized with Log4j2: UTF-8 for files, console charset for console
+
+#### Property Renaming
+```properties
+# Tracing:
+management.tracing.enabled → management.tracing.export.enabled
+
+# Spring Session:
+spring.session.redis.* → spring.session.data.redis.*
+spring.session.mongodb.* → spring.session.data.mongodb.*
+
+# MongoDB metrics:
+management.metrics.mongo.* → management.metrics.mongodb.*
+```
+
+### 11. Build and Deployment Changes
+
+#### Maven
+- Optional dependencies no longer in uber jars by default
+- Use `<includeOptional>true</includeOptional>` if needed
+
+#### Gradle  
+- Gradle 9 now supported (8.14+ also works)
+- Minimum CycloneDX plugin version: 3.0.0
+
+#### AOP Starter
+- `spring-boot-starter-aop` renamed to `spring-boot-starter-aspectj`
+- Only add if you actually use AspectJ (`@Aspect` annotations)
+
+#### Classic Loader
+Classic uber-jar loader removed:
+```xml
+<!-- Remove this from pom.xml: -->
+<loaderImplementation>CLASSIC</loaderImplementation>
+```
+
+#### Tomcat WAR Deployment
+For war deployment to Tomcat:
+```xml
+<!-- Change from: -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-tomcat</artifactId>
+</dependency>
+
+<!-- To: -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-tomcat-runtime</artifactId>
+</dependency>
+```
+
+### 12. Actuator Changes
+
+#### Health Probes
+- Liveness and readiness probes **enabled by default**
+- Health endpoint now exposes `liveness` and `readiness` groups
+- Disable with: `management.endpoint.health.probes.enabled=false`
+
+#### SSL Health
+- Status `WILL_EXPIRE_SOON` removed
+- Expiring certificates will have status `VALID`
+- Expiring chains listed in new `expiringChains` entry
+
+## Migration Strategy
+
+### For New Projects
+1. ✅ Start with Spring Boot 4.0.x directly
+2. ✅ Use Java 25+ for modern features
+3. ✅ Use `@MockitoBean` from the start (not `@MockBean`)
+4. ✅ Use technology-specific starters (not classic)
+5. ✅ Plan for Jackson 3 API usage
+6. ✅ Use TestContainers 2.0+
+
+### For Existing Projects (Spring Boot 3 → 4)
+1. Upgrade to latest Spring Boot 3.5.x first
+2. Fix all deprecation warnings
+3. Review dependency versions (especially Spring Cloud)
+4. Use classic starters temporarily: `spring-boot-starter-classic` and `spring-boot-starter-test-classic`
+5. Update imports for moved packages (e.g., `BootstrapRegistry`, `EnvironmentPostProcessor`)
+6. Migrate `@MockBean` to `@MockitoBean`
+7. Test thoroughly, then migrate away from classic starters
+
+### Quick Migration Checklist
+
+- [ ] Java 17+ (25 recommended)
+- [ ] `<start-class>` property set in `pom.xml` (required for `process-aot`)
+- [ ] Jakarta EE 11 / Servlet 6.1 dependencies updated
+- [ ] Replace `@MockBean` with `@MockitoBean` in tests
+- [ ] Update `@WebMvcTest`/`@AutoConfigureMockMvc` imports to `org.springframework.boot.webmvc.test.autoconfigure` and add `spring-boot-starter-webmvc-test` dependency
+- [ ] Add `@AutoConfigureMockMvc` where needed
+- [ ] TestContainers 2.0+ in use (`testcontainers-postgresql` artifact, `org.testcontainers.postgresql` package)
+- [ ] No Undertow references
+- [ ] Jackson 3 package names (or using compatibility mode)
+- [ ] Technology-specific starters added where needed
+- [ ] MongoDB properties renamed if applicable
+- [ ] Spring Batch database starter if needed
+- [ ] Elasticsearch client updated to Rest5Client
+- [ ] Property names updated (tracing, session, persistence)
+
+## Best Practices for Spring Boot 4 Projects
+
+1. **Use Java 25+** for modern features and native image support
+2. **Modular starters** - Use technology-specific starters, not classic
+3. **@MockitoBean** - Adopt from the start, avoid deprecated `@MockBean`
+4. **TestContainers 2.0** - Use `@ServiceConnection` for simplified testing
+5. **Jackson 3** - Plan API usage with new package names
+6. **Virtual threads** - Consider enabling for HTTP clients: `spring.threads.virtual.enabled=true`
+7. **OpenTelemetry** - Use new starter for observability
+8. **Health probes** - Leverage default liveness/readiness endpoints
+
+## Resources
+
+- [Spring Boot 4.0 Release Notes](https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-4.0-Release-Notes)
+- [Spring Boot 4.0 Migration Guide](https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-4.0-Migration-Guide)
+- [Spring Framework 7.0 Release Notes](https://github.com/spring-projects/spring-framework/wiki/Spring-Framework-7.0-Release-Notes)
+- [Spring Security 7.0 Migration Guide](https://docs.spring.io/spring-security/reference/7.0/migration/)
+- [Spring Data 2025.1 Release Notes](https://github.com/spring-projects/spring-data-commons/wiki/Spring-Data-2025.1-Release-Notes)
