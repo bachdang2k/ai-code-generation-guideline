@@ -15,6 +15,7 @@
   - [2.3 Ví dụ quy trình tạo Rule](#23-ví-dụ-quy-trình-tạo-rule)
 - [Phần 3: Ví dụ thực tế - Feature Đối soát thù lao](#phần-3-ví-dụ-thực-tế---feature-đối-soát-thù-lao)
 
+NOTE: BẠN CẦN LÊN TRƯỚC PHƯƠNG ÁN KỸ THUẬT, CẦN PHẢI CÓ THIẾT KÊ DATABASE, FLOW CODE CŨNG CẦN PHẢI LÊN Ý TƯỞNG TRƯỚC. SAU ĐÓ AI SẼ HỖ TRỢ CHÚNG TA LÀM CHI TIẾT Ý TƯỞNG ĐÓ TRƯỚC KHI BIẾN Ý TƯỞNG THÀNH CODE.
 ---
 
 ## Phần 1: Tổng quan về Workflow
